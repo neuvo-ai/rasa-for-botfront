@@ -1,8 +1,19 @@
 # Rasa for Botfront
 
+<h1 align="center">Rasa Open Source</h1>
+
+<div align="center">
+
 A fork to be used with **Botfront**, an open source chatbot platform built with Rasa.
 
 For more information visit the [Botfront project on Github](https://github.com/botfront/botfront)
+</div>
+
+<a href="https://grnh.se/05a908c02us" target="_blank"><img align="center" src="https://www.rasa.com/assets/img/github/hiring_banner.png" alt="An image with Sara, the Rasa mascot, standing next to a roadmap with future Rasa milestones: identifying unsuccessful conversations at scale, continuous model evaluation, controllable NLG and breaking free from intents. Are you excited about these milestones? Help us make these ideas become reality - we're hiring!" title="We're hiring! Learn more"></a>
+
+<hr />
+
+<img align="right" height="244" src="https://www.rasa.com/assets/img/sara/sara-open-source-2.0.png" alt="An image of Sara, the Rasa mascot bird, holding a flag that reads Open Source with one wing, and a wrench in the other" title="Rasa Open Source">
 
 
 # Rasa Addons
@@ -102,6 +113,31 @@ credentials:
   ...
 ```
 
+### Running the Integration Tests
+
+In order to run the integration tests, make sure that you have the development requirements installed:
+
+```bash
+make prepare-tests-ubuntu # Only on Ubuntu and Debian based systems
+make prepare-tests-macos  # Only on macOS
+```
+
+Then, you'll need to start services with the following command which uses
+[Docker Compose](https://docs.docker.com/compose/install/):
+
+```bash
+make run-integration-containers
+```
+
+Finally, you can run the integration tests like this:
+
+```bash
+make test-integration
+```
+
+
+### Resolving merge conflicts
+
 ## rasa_addons.core.channels.rest.BotfrontRestInput
 
 Rest Input Channel with multilanguage and metadata support.
@@ -147,3 +183,107 @@ endpoints:
     type: 'rasa_addons.core.nlg.GraphQLNaturalLanguageGenerator'
   ...
 ```
+make types
+```
+
+### Deploying documentation updates
+
+We use `Docusaurus v2` to build docs for tagged versions and for the `main` branch.
+The static site that gets built is pushed to the `documentation` branch of this repo.
+
+We host the site on netlify. On `main` branch builds (see `.github/workflows/documentation.yml`), we push the built docs to
+the `documentation` branch. Netlify automatically re-deploys the docs pages whenever there is a change to that branch.
+
+## Releases
+### Release Timeline for Minor Releases
+**For Rasa Open Source, we usually commit to time-based releases, specifically on a monthly basis.**
+This means that we commit beforehand to releasing a specific version of Rasa Open Source on a specific day,
+and we cannot be 100% sure what will go in a release, because certain features may not be ready.
+
+At the beginning of each quarter, the Rasa team will review the scheduled release dates for all products and make sure
+they work for the projected work we have planned for the quarter, as well as work well across products.
+
+**Once the dates are settled upon, we update the respective [milestones](https://github.com/RasaHQ/rasa/milestones).**
+
+### Cutting a Major / Minor release
+#### A week before release day
+
+1. **Make sure the [milestone](https://github.com/RasaHQ/rasa/milestones) already exists and is scheduled for the
+correct date.**
+2. **Take a look at the issues & PRs that are in the milestone**: does it look about right for the release highlights
+we are planning to ship? Does it look like anything is missing? Don't worry about being aware of every PR that should
+be in, but it's useful to take a moment to evaluate what's assigned to the milestone.
+3. **Post a message on the engineering Slack channel**, letting the team know you'll be the one cutting the upcoming
+release, as well as:
+    1. Providing the link to the appropriate milestone
+    2. Reminding everyone to go over their issues and PRs and please assign them to the milestone
+    3. Reminding everyone of the scheduled date for the release
+
+#### A day before release day
+
+1. **Go over the milestone and evaluate the status of any PR merging that's happening. Follow up with people on their
+bugs and fixes.** If the release introduces new bugs or regressions that can't be fixed in time, we should discuss on
+Slack about this and take a decision to go forward or postpone the release. The PR / issue owners are responsible for
+communicating any issues which might be release relevant.
+
+#### Release day! 🚀
+
+1. **At the start of the day, post a small message on slack announcing release day!**. Communicate you'll be handling
+the release, and the time you're aiming to start releasing (again, no later than 4pm, as issues may arise and
+cause delays)
+2. Make sure the milestone is empty (everything has been either merged or moved to the next milestone)
+3. Once everything in the milestone is taken care of, post a small message on Slack communicating you are about to
+start the release process (in case anything is missing).
+4. **You may now do the release by following the instructions outlined in the
+[Rasa Open Source README](#steps-to-release-a-new-version) !**
+
+### Steps to release a new version
+Releasing a new version is quite simple, as the packages are build and distributed by GitHub Actions.
+
+*Terminology*:
+* micro release (third version part increases): 1.1.2 -> 1.1.3
+* minor release (second version part increases): 1.1.3 -> 1.2.0
+* major release (first version part increases): 1.2.0 -> 2.0.0
+
+*Release steps*:
+1. Make sure all dependencies are up to date (**especially Rasa SDK**)
+    - For Rasa SDK that means first creating a [new Rasa SDK release](https://github.com/RasaHQ/rasa-sdk#steps-to-release-a-new-version) (make sure the version numbers between the new Rasa and Rasa SDK releases match)
+    - Once the tag with the new Rasa SDK release is pushed and the package appears on [pypi](https://pypi.org/project/rasa-sdk/), the dependency in the rasa repository can be resolved (see below).
+2. Switch to the branch you want to cut the release from (`main` in case of a major / minor, the current feature branch for micro releases)
+    - Update the `rasa-sdk` entry in `pyproject.toml` with the new release version and run `poetry update`. This creates a new `poetry.lock` file with all dependencies resolved.
+    - Commit the changes with `git commit -am "bump rasa-sdk dependency"` but do not push them. They will be automatically picked up by the following step.
+3. Run `make release`
+4. Create a PR against `main` or the release branch (e.g. `1.2.x`)
+5. Once your PR is merged, tag a new release (this SHOULD always happen on `main` or release branches), e.g. using
+    ```bash
+    git tag 1.2.0 -m "next release"
+    git push origin 1.2.0
+    ```
+    GitHub will build this tag and publish the build artifacts.
+6. **If this is a minor release**, a new release branch should be created pointing to the same commit as the tag to allow for future patch releases, e.g.
+    ```bash
+    git checkout -b 1.2.x
+    git push origin 1.2.x
+    ```
+
+### Cutting a Micro release
+
+Micro releases are simpler to cut, since they are meant to contain only bugfixes.
+
+**The only things you need to do to cut a micro are:**
+
+1. Notify the engineering team on Slack that you are planning to cut a micro, in case someone has an important fix
+to add.
+2. Make sure the bugfix(es) are in the release branch you will use (p.e if you are cutting a `2.0.4` micro, you will
+need your fixes to be on the `2.0.x` release branch). All micros must come from a `.x` branch!
+3. Once you're ready to release the Rasa Open Source micro, checkout the branch, run `make release` and follow the
+steps + get the PR merged.
+4. Once the PR is in, pull the `.x` branch again and push the tag!
+
+## License
+Licensed under the Apache License, Version 2.0.
+Copyright 2021 Rasa Technologies GmbH. [Copy of the license](LICENSE.txt).
+
+A list of the Licenses of the dependencies of the project can be found at
+the bottom of the
+[Libraries Summary](https://libraries.io/github/RasaHQ/rasa).

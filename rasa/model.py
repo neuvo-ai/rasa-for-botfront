@@ -83,7 +83,7 @@ SECTION_NLU = Section(
         FINGERPRINT_RASA_VERSION_KEY,
     ],
 )
-SECTION_NLG = Section(name="NLG templates", relevant_keys=[FINGERPRINT_NLG_KEY])
+SECTION_NLG = Section(name="NLG responses", relevant_keys=[FINGERPRINT_NLG_KEY])
 
 
 class FingerprintComparisonResult:
@@ -130,16 +130,19 @@ class FingerprintComparisonResult:
         return self.force_training or self.nlu
 
 
-def get_model(model_path: Text = DEFAULT_MODELS_PATH) -> TempDirectoryPath:
-    """Get a model and unpack it. Raises a `ModelNotFound` exception if
-    no model could be found at the provided path.
+def get_local_model(model_path: Text = DEFAULT_MODELS_PATH) -> Text:
+    """Returns verified path to local model archive.
 
     Args:
         model_path: Path to the zipped model. If it's a directory, the latest
                     trained model is returned.
 
     Returns:
-        Path to the unpacked model.
+        Path to the zipped model. If it's a directory, the latest
+                    trained model is returned.
+
+    Raises:
+        ModelNotFound Exception: When no model could be found at the provided path.
 
     """
     if not model_path:
@@ -156,10 +159,30 @@ def get_model(model_path: Text = DEFAULT_MODELS_PATH) -> TempDirectoryPath:
     elif not model_path.endswith(".tar.gz"):
         raise ModelNotFound(f"Path '{model_path}' does not point to a Rasa model file.")
 
+    return model_path
+
+
+def get_model(model_path: Text = DEFAULT_MODELS_PATH) -> TempDirectoryPath:
+    """Gets a model and unpacks it.
+
+    Args:
+        model_path: Path to the zipped model. If it's a directory, the latest
+                    trained model is returned.
+
+    Returns:
+        Path to the unpacked model.
+
+    Raises:
+        ModelNotFound Exception: When no model could be found at the provided path.
+
+    """
+    model_path = get_local_model(model_path)
+
     try:
         model_relative_path = os.path.relpath(model_path)
     except ValueError:
         model_relative_path = model_path
+
     logger.info(f"Loading model {model_relative_path}...")
 
     return unpack_model(model_path)
@@ -333,13 +356,13 @@ async def model_fingerprint(file_importer: "TrainingDataImporter") -> Fingerprin
     nlu_data = await file_importer.get_nlu_data()
     nlu_config = await file_importer.get_nlu_config()
 
-    responses = domain.templates
+    responses = domain.responses
 
     # Do a copy of the domain to not change the actual domain (shallow is enough)
     domain = copy.copy(domain)
     # don't include the response texts in the fingerprint.
     # Their fingerprint is separate.
-    domain.templates = {}
+    domain.responses = {}
 
     return {
         FINGERPRINT_CONFIG_KEY: _get_fingerprint_of_config(
@@ -521,12 +544,12 @@ def should_retrain(
         old_model: Path to the old zipped model file.
         train_path: Path to the directory in which the new model will be trained.
         has_e2e_examples: Whether the new training data contains e2e examples.
-        force_training: Indicates if the model needs to be retrained even if the data has not changed.
+        force_training: Indicates if the model needs to be retrained even if the data
+            has not changed.
 
     Returns:
-        A FingerprintComparisonResult object indicating whether Rasa Core and/or Rasa NLU needs
-        to be retrained or not.
-
+        A FingerprintComparisonResult object indicating whether Rasa Core and/or Rasa
+        NLU needs to be retrained or not.
     """
     fingerprint_comparison = FingerprintComparisonResult()
 
