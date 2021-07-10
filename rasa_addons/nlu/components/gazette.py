@@ -65,9 +65,10 @@ class Gazette(Component):
         gazette_dict = {}
         if hasattr(training_data, "gazette") and type(training_data.gazette) == list:
             for item in training_data.gazette:
-                name = item["value"]
-                table = item["gazette"]
-                gazette_dict[name] = table
+                if type(item) is dict:
+                    name = item["value"]
+                    table = item["gazette"]
+                    gazette_dict[name] = table
             self.gazette = gazette_dict
 
     def persist(self, file_name: Text, model_dir: Text) -> Optional[Dict[Text, Any]]:
