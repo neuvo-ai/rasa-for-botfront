@@ -178,20 +178,26 @@ async def test_nlu(
 
     rasa.shared.utils.io.create_directory(output_directory)
 
-    nlu_model = os.path.join(unpacked_model, "nlu")
+    # bf
+    for nlu_model in [
+        os.path.join(unpacked_model, file)
+        for file in os.listdir(unpacked_model)
+        if os.path.isdir(file) and file.startswith("nlu")
+    ]:
+        # nlu_model = os.path.join(unpacked_model, "nlu")
 
-    if os.path.exists(nlu_model):
-        kwargs = rasa.shared.utils.common.minimal_kwargs(
-            additional_arguments, run_evaluation, ["data_path", "model"]
-        )
-        await run_evaluation(
-            nlu_data, nlu_model, output_directory=output_directory, **kwargs
-        )
-    else:
-        rasa.shared.utils.cli.print_error(
-            "Could not find any model. Use 'rasa train nlu' to train a "
-            "Rasa model and provide it via the '--model' argument."
-        )
+        if os.path.exists(nlu_model):
+            kwargs = rasa.shared.utils.common.minimal_kwargs(
+                additional_arguments, run_evaluation, ["data_path", "model"]
+            )
+            await run_evaluation(
+                nlu_data, nlu_model, output_directory=output_directory, **kwargs
+            )
+        else:
+            rasa.shared.utils.cli.print_error(
+                "Could not find any model. Use 'rasa train nlu' to train a "
+                "Rasa model and provide it via the '--model' argument."
+            )
 
 
 async def compare_nlu_models(

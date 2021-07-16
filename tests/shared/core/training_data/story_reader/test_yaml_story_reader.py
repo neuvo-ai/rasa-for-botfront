@@ -196,12 +196,39 @@ async def test_can_read_test_story_with_entities_without_value(default_domain: D
     "file,is_yaml_file",
     [
         ("data/test_yaml_stories/stories.yml", True),
-        ("data/test_stories/stories.md", False),
+        ("data/test_md/end_to_end_story.md", False),
         ("data/test_yaml_stories/rules_without_stories.yml", True),
     ],
 )
 async def test_is_yaml_file(file: Text, is_yaml_file: bool):
     assert YAMLStoryReader.is_stories_file(file) == is_yaml_file
+
+
+@pytest.mark.parametrize(
+    "file,keys,expected_result",
+    [
+        ("data/test_yaml_stories/stories.yml", ["stories"], True),
+        ("data/test_yaml_stories/stories.yml", ["something_else"], False),
+        ("data/test_yaml_stories/stories.yml", ["stories", "something_else"], True),
+        (
+            "data/test_domains/default_retrieval_intents.yml",
+            ["intents", "responses"],
+            True,
+        ),
+        ("data/test_yaml_stories/rules_without_stories.yml", ["rules"], True),
+        ("data/test_yaml_stories/rules_without_stories.yml", ["stories"], False),
+        ("data/test_stories/stories.md", ["something"], False),
+    ],
+)
+async def test_is_key_in_yaml(file: Text, keys: List[Text], expected_result: bool):
+    assert YAMLStoryReader.is_key_in_yaml(file, *keys) == expected_result
+
+
+async def test_is_key_in_yaml_with_unicode_files():
+    # This shouldn't raise
+    assert YAMLStoryReader.is_key_in_yaml(
+        "./data/test_nlu_no_responses/nlu_with_unicode.yml", "nlu"
+    )
 
 
 async def test_yaml_intent_with_leading_slash_warning(default_domain: Domain):

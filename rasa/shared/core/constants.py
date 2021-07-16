@@ -83,3 +83,4 @@ ENTITY_LABEL_SEPARATOR = "#"
 
 from rasa_addons.core.action_list import action_list # bf
 DEFAULT_ACTION_NAMES += action_list # bf
+POLICIES_THAT_EXTRACT_ENTITIES = {"TEDPolicy"}

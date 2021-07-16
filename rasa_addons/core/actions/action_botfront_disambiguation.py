@@ -5,7 +5,7 @@ from rasa.shared.core.events import (
     Event,
     SlotSet,
 )
-from rasa.core.actions.action import Action, ActionUtterTemplate, create_bot_utterance
+from rasa.core.actions.action import Action, ActionBotResponse, create_bot_utterance
 
 from typing import Any, List, Text, Dict, Optional
 import logging
@@ -78,7 +78,7 @@ class ActionBotfrontDisambiguationFollowup(Action):
         return revert_events
 
 
-class ActionBotfrontFallback(ActionUtterTemplate):
+class ActionBotfrontFallback(ActionBotResponse):
     def name(self) -> Text:
         return "action_botfront_fallback"
 

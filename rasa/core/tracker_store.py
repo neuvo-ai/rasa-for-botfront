@@ -184,8 +184,22 @@ class TrackerStore:
         return tracker
 
     def save(self, tracker):
-        """Save method that will be overridden by specific tracker"""
+        """Save method that will be overridden by specific tracker."""
         raise NotImplementedError()
+
+    def exists(self, conversation_id: Text) -> bool:
+        """Checks if tracker exists for the specified ID.
+
+        This method may be overridden by the specific tracker store for
+        faster implementations.
+
+        Args:
+            conversation_id: Conversation ID to check if the tracker exists.
+
+        Returns:
+            `True` if the tracker exists, `False` otherwise.
+        """
+        return self.retrieve(conversation_id) is not None
 
     def retrieve(self, sender_id: Text) -> Optional[DialogueStateTracker]:
         """Retrieves tracker for the latest conversation session.
@@ -611,9 +625,12 @@ class MongoTrackerStore(TrackerStore):
 
         stored = self.conversations.find_one({"sender_id": tracker.sender_id}) or {}
         all_events = self._events_from_serialized_tracker(stored)
-        number_events_since_last_session = len(
-            self._events_since_last_session_start(all_events)
-        )
+        if self.retrieve_events_from_previous_conversation_sessions:
+            number_events_since_last_session = len(all_events)
+        else:
+            number_events_since_last_session = len(
+                self._events_since_last_session_start(all_events)
+            )
 
         return itertools.islice(
             tracker.events, number_events_since_last_session, len(tracker.events)
@@ -939,13 +956,14 @@ class SQLTrackerStore(TrackerStore):
             return
 
         self._create_database(self.engine, db)
+        self.engine.dispose()
         engine_url.database = db
         self.engine = create_engine(engine_url)
 
     @staticmethod
     def _create_database(engine: "Engine", database_name: Text) -> None:
         """Create database `db` on `engine` if it does not exist."""
-        import psycopg2
+        import sqlalchemy.exc
 
         conn = engine.connect()
 
@@ -964,7 +982,10 @@ class SQLTrackerStore(TrackerStore):
         if not matching_rows:
             try:
                 conn.execute(f"CREATE DATABASE {database_name}")
-            except psycopg2.IntegrityError as e:
+            except (
+                sqlalchemy.exc.ProgrammingError,
+                sqlalchemy.exc.IntegrityError,
+            ) as e:
                 logger.error(f"Could not create database '{database_name}': {e}")
 
         conn.close()
@@ -1108,10 +1129,12 @@ class SQLTrackerStore(TrackerStore):
         self, session: "Session", tracker: DialogueStateTracker
     ) -> Iterator:
         """Return events from the tracker which aren't currently stored."""
-
         number_of_events_since_last_session = self._event_query(
-            session, tracker.sender_id, fetch_events_from_all_sessions=False
+            session,
+            tracker.sender_id,
+            fetch_events_from_all_sessions=self.retrieve_events_from_previous_conversation_sessions,
         ).count()
+
         return itertools.islice(
             tracker.events, number_of_events_since_last_session, len(tracker.events)
         )
