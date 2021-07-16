@@ -182,9 +182,11 @@ async def test_nlu(
     for nlu_model in [
         os.path.join(unpacked_model, file)
         for file in os.listdir(unpacked_model)
-        if os.path.isdir(file) and file.startswith("nlu")
+        if file.startswith("nlu")
     ]:
         # nlu_model = os.path.join(unpacked_model, "nlu")
+
+        rasa.shared.utils.cli.print_info(f"Trying to test {nlu_model}...")
 
         if os.path.exists(nlu_model):
             kwargs = rasa.shared.utils.common.minimal_kwargs(
