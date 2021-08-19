@@ -1,29 +1,30 @@
-import logging
 import typing
+import logging
 from typing import Any, Dict, List, Optional, Text, Tuple
 
-from rasa.nlu.components import Component
-from rasa.nlu.config import RasaNLUModelConfig
+import rasa.shared.utils.io
 import rasa.utils.train_utils
-from rasa.shared.nlu.training_data.training_data import TrainingData
-from rasa.shared.nlu.training_data.message import Message
+from rasa.nlu.components import Component
 from rasa.nlu.model import InvalidModelError
+from rasa.nlu.config import RasaNLUModelConfig
+from rasa.shared.nlu.training_data.message import Message
+from rasa.shared.nlu.training_data.training_data import TrainingData
+from rasa.shared.constants import DOCS_URL_COMPONENTS
 from rasa.nlu.constants import SPACY_DOCS, DENSE_FEATURIZABLE_ATTRIBUTES
 
 logger = logging.getLogger(__name__)
 
 if typing.TYPE_CHECKING:
-    from spacy.language import Language
+    from spacy.language import Language  # noqa: F401
     from spacy.tokens.doc import Doc
     from rasa.nlu.model import Metadata
 
 
 class SpacyNLP(Component):
+    """The core component that links spaCy to related components in the pipeline."""
 
     defaults = {
-        # name of the language model to load - if it is not set
-        # we will be looking for a language model that is named
-        # after the language of the model, e.g. `en`
+        # name of the language model to load
         "model": None,
         # when retrieving word vectors, this will decide if the casing
         # of the word is relevant. E.g. `hello` and `Hello` will
@@ -45,15 +46,24 @@ class SpacyNLP(Component):
         """Try loading the model, catching the OSError if missing."""
         import spacy
 
+        if not spacy_model_name:
+            raise InvalidModelError(
+                f"Missing model configuration for `SpacyNLP` in `config.yml`.\n"
+                f"You must pass a model to the `SpacyNLP` component explicitly.\n"
+                f"For example:\n"
+                f"- name: SpacyNLP\n"
+                f"  model: en_core_web_md\n"
+                f"More informaton can be found on {DOCS_URL_COMPONENTS}#spacynlp"
+            )
+
         try:
             return spacy.load(spacy_model_name, disable=["parser"])
         except OSError:
             raise InvalidModelError(
-                "Model '{}' is not a linked spaCy model.  "
-                "Please download and/or link a spaCy model, "
-                "e.g. by running:\npython -m spacy download "
-                "en_core_web_md\npython -m spacy link "
-                "en_core_web_md en".format(spacy_model_name)
+                f"Please confirm that {spacy_model_name} is an available spaCy model. "
+                f"You need to download one upfront. For example:\n"
+                f"python -m spacy download en_core_web_md\n"
+                f"More informaton can be found on {DOCS_URL_COMPONENTS}#spacynlp"
             )
 
     @classmethod
@@ -68,13 +78,7 @@ class SpacyNLP(Component):
         component_config = rasa.utils.train_utils.override_defaults(
             cls.defaults, component_config
         )
-
         spacy_model_name = component_config.get("model")
-
-        # if no model is specified, we fall back to the language string
-        if not spacy_model_name:
-            spacy_model_name = config.language
-            component_config["model"] = config.language
 
         logger.info(f"Trying to load spacy model with name '{spacy_model_name}'")
 
@@ -88,21 +92,20 @@ class SpacyNLP(Component):
         cls, component_meta: Dict[Text, Any], model_metadata: "Metadata"
     ) -> Optional[Text]:
 
-        # Fallback, use the language name, e.g. "en",
-        # as the model name if no explicit name is defined
-        spacy_model_name = component_meta.get("model", model_metadata.language)
+        spacy_model_name = component_meta.get("model")
 
         return cls.name + "-" + spacy_model_name
 
     def provide_context(self) -> Dict[Text, Any]:
+        """Creates a context dictionary from spaCy nlp object."""
         return {"spacy_nlp": self.nlp}
 
     def doc_for_text(self, text: Text) -> "Doc":
-
+        """Makes a spaCy doc object from a string of text."""
         return self.nlp(self.preprocess_text(text))
 
     def preprocess_text(self, text: Optional[Text]) -> Text:
-
+        """Processes the text before it is handled by spaCy."""
         if text is None:
             # converted to empty string so that it can still be passed to spacy.
             # Another option could be to neglect tokenization of the attribute of
@@ -246,18 +249,16 @@ class SpacyNLP(Component):
     def load(
         cls,
         meta: Dict[Text, Any],
-        model_dir: Text = None,
+        model_dir: Text,
         model_metadata: "Metadata" = None,
         cached_component: Optional["SpacyNLP"] = None,
         **kwargs: Any,
     ) -> "SpacyNLP":
-
+        """Loads trained component (see parent class for full docstring)."""
         if cached_component:
             return cached_component
 
-        model_name = meta.get("model")
-
-        nlp = cls.load_model(model_name)
+        nlp = cls.load_model(meta.get("model"))
         cls.ensure_proper_language_model(nlp)
         return cls(meta, nlp)
 
@@ -277,8 +278,8 @@ class SpacyNLP(Component):
             # it did not load the model from disk.
             # In this case `nlp` is an unusable stub.
             raise Exception(
-                "Failed to load spacy language model for "
-                "lang '{}'. Make sure you have downloaded the "
-                "correct model (https://spacy.io/docs/usage/)."
-                "".format(nlp.lang)
+                f"Failed to load spacy language model for "
+                f"lang '{nlp.lang}'. Make sure you have downloaded the "
+                f"correct model (https://spacy.io/docs/usage/)."
+                ""
             )

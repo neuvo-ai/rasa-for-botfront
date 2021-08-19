@@ -2,7 +2,6 @@ import logging
 import typing
 from typing import Any, Optional, Text, Tuple, Union, Dict
 
-import rasa.shared.utils.common
 from rasa.nlu import config, utils
 from rasa.nlu.components import ComponentBuilder
 from rasa.nlu.config import RasaNLUModelConfig
@@ -14,6 +13,7 @@ from rasa.utils.endpoints import EndpointConfig
 if typing.TYPE_CHECKING:
     from rasa.shared.importers.importer import TrainingDataImporter
     from rasa.shared.nlu.training_data.training_data import TrainingData
+    from rasa.nlu.persistor import Persistor
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ async def load_data_from_endpoint(
         logger.warning(f"Could not retrieve training data from URL:\n{e}")
 
 
-def create_persistor(persistor: Optional[Text]):
+def create_persistor(persistor: Optional[Text]) -> Optional["Persistor"]:
     """Create a remote persistor to store the model if configured."""
 
     if persistor is not None:
@@ -107,10 +107,6 @@ async def train(
         training_data = load_data(data, nlu_config.language)
 
     training_data.print_stats()
-    if training_data.entity_roles_groups_used():
-        rasa.shared.utils.common.mark_as_experimental_feature(
-            "Entity Roles and Groups feature"
-        )
 
     interpreter = trainer.train(training_data, **kwargs)
 

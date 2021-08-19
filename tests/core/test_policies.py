@@ -29,6 +29,7 @@ from rasa.shared.core.constants import (
     ACTION_BACK_NAME,
     PREVIOUS_ACTION,
     USER,
+    ACTION_UNLIKELY_INTENT_NAME,
 )
 from rasa.shared.core.domain import State, Domain
 from rasa.shared.core.events import (
@@ -36,6 +37,8 @@ from rasa.shared.core.events import (
     ConversationPaused,
     Event,
     UserUttered,
+    EntitiesAdded,
+    SlotSet,
 )
 from rasa.core.featurizers.single_state_featurizer import SingleStateFeaturizer
 from rasa.core.featurizers.tracker_featurizers import (
@@ -54,19 +57,14 @@ from rasa.core.policies.memoization import AugmentedMemoizationPolicy, Memoizati
 from rasa.core.policies.sklearn_policy import SklearnPolicy
 from rasa.shared.core.trackers import DialogueStateTracker
 from rasa.shared.nlu.training_data.formats.markdown import INTENT
-from tests.core.conftest import (
-    DEFAULT_DOMAIN_PATH_WITH_MAPPING,
-    DEFAULT_DOMAIN_PATH_WITH_SLOTS,
-    DEFAULT_STORIES_FILE,
-)
 from tests.core.utilities import get_tracker, read_dialogue_file, user_uttered
 
 
 async def train_trackers(
-    domain: Domain, augmentation_factor: int = 20
+    domain: Domain, stories_file: Text, augmentation_factor: int = 20
 ) -> List[TrackerWithCachedStates]:
     return await training.load_data(
-        DEFAULT_STORIES_FILE, domain, augmentation_factor=augmentation_factor
+        stories_file, domain, augmentation_factor=augmentation_factor
     )
 
 
@@ -101,8 +99,8 @@ class PolicyTestCollection:
         return 1
 
     @pytest.fixture(scope="class")
-    def default_domain(self) -> Domain:
-        return Domain.load(DEFAULT_DOMAIN_PATH_WITH_SLOTS)
+    def default_domain(self, domain_path: Text) -> Domain:
+        return Domain.load(domain_path)
 
     @pytest.fixture(scope="class")
     def tracker(self, default_domain: Domain) -> DialogueStateTracker:
@@ -110,11 +108,16 @@ class PolicyTestCollection:
 
     @pytest.fixture(scope="class")
     async def trained_policy(
-        self, featurizer: Optional[TrackerFeaturizer], priority: int
+        self,
+        featurizer: Optional[TrackerFeaturizer],
+        priority: int,
+        stories_path: Text,
+        default_domain: Domain,
     ) -> Policy:
-        default_domain = Domain.load(DEFAULT_DOMAIN_PATH_WITH_SLOTS)
         policy = self.create_policy(featurizer, priority)
-        training_trackers = await train_trackers(default_domain, augmentation_factor=20)
+        training_trackers = await train_trackers(
+            default_domain, stories_path, augmentation_factor=20
+        )
         policy.train(training_trackers, default_domain, RegexInterpreter())
         return policy
 
@@ -137,6 +140,7 @@ class PolicyTestCollection:
         default_domain: Domain,
         tmp_path: Path,
         should_finetune: bool,
+        stories_path: Text,
     ):
         trained_policy.persist(str(tmp_path))
         loaded = trained_policy.__class__.load(
@@ -144,7 +148,9 @@ class PolicyTestCollection:
         )
         assert loaded.finetune_mode == should_finetune
 
-        trackers = await train_trackers(default_domain, augmentation_factor=20)
+        trackers = await train_trackers(
+            default_domain, stories_path, augmentation_factor=20
+        )
 
         for tracker in trackers:
             predicted_probabilities = loaded.predict_action_probabilities(
@@ -202,8 +208,12 @@ class TestSklearnPolicy(PolicyTestCollection):
             yield gs
 
     @pytest.fixture(scope="class")
-    async def trackers(self, default_domain: Domain) -> List[TrackerWithCachedStates]:
-        return await train_trackers(default_domain, augmentation_factor=20)
+    async def trackers(
+        self, default_domain: Domain, stories_path: Text
+    ) -> List[TrackerWithCachedStates]:
+        return await train_trackers(
+            default_domain, stories_path, augmentation_factor=20
+        )
 
     def test_additional_train_args_do_not_raise(
         self,
@@ -377,9 +387,14 @@ class TestMemoizationPolicy(PolicyTestCollection):
         assert loaded.featurizer.state_featurizer is None
 
     async def test_memorise(
-        self, trained_policy: MemoizationPolicy, default_domain: Domain
+        self,
+        trained_policy: MemoizationPolicy,
+        default_domain: Domain,
+        stories_path: Text,
     ):
-        trackers = await train_trackers(default_domain, augmentation_factor=20)
+        trackers = await train_trackers(
+            default_domain, stories_path, augmentation_factor=20
+        )
         trained_policy.train(trackers, default_domain, RegexInterpreter())
         lookup_with_augmentation = trained_policy.lookup
 
@@ -390,7 +405,7 @@ class TestMemoizationPolicy(PolicyTestCollection):
         (
             all_states,
             all_actions,
-        ) = trained_policy.featurizer.training_states_and_actions(
+        ) = trained_policy.featurizer.training_states_and_labels(
             trackers, default_domain
         )
 
@@ -404,7 +419,7 @@ class TestMemoizationPolicy(PolicyTestCollection):
 
         # compare augmentation for augmentation_factor of 0 and 20:
         trackers_no_augmentation = await train_trackers(
-            default_domain, augmentation_factor=0
+            default_domain, stories_path, augmentation_factor=0
         )
         trained_policy.train(
             trackers_no_augmentation, default_domain, RegexInterpreter()
@@ -421,15 +436,17 @@ class TestMemoizationPolicy(PolicyTestCollection):
 
         tracker = DialogueStateTracker(dialogue.name, default_domain.slots)
         tracker.recreate_from_dialogue(dialogue)
-        states = trained_policy.featurizer.prediction_states([tracker], default_domain)[
-            0
-        ]
+        states = trained_policy._prediction_states(tracker, default_domain)
 
         recalled = trained_policy.recall(states, tracker, default_domain)
         assert recalled is not None
 
     async def test_finetune_after_load(
-        self, trained_policy: MemoizationPolicy, default_domain: Domain, tmp_path: Path
+        self,
+        trained_policy: MemoizationPolicy,
+        default_domain: Domain,
+        tmp_path: Path,
+        stories_path: Text,
     ):
 
         trained_policy.persist(tmp_path)
@@ -450,14 +467,14 @@ class TestMemoizationPolicy(PolicyTestCollection):
             ],
         )
         original_train_data = await train_trackers(
-            default_domain, augmentation_factor=20
+            default_domain, stories_path, augmentation_factor=20
         )
         loaded_policy.train(
             original_train_data + [new_story], default_domain, RegexInterpreter()
         )
 
         # Get the hash of the tracker state of new story
-        new_story_states, _ = loaded_policy.featurizer.training_states_and_actions(
+        new_story_states, _ = loaded_policy.featurizer.training_states_and_labels(
             [new_story], default_domain
         )
 
@@ -465,6 +482,65 @@ class TestMemoizationPolicy(PolicyTestCollection):
         for states in new_story_states:
             state_key = loaded_policy._create_feature_key(states)
             assert state_key in loaded_policy.lookup
+
+    @pytest.mark.parametrize(
+        "tracker_events_with_action, tracker_events_without_action",
+        [
+            (
+                [
+                    ActionExecuted(ACTION_LISTEN_NAME),
+                    UserUttered(text="hello", intent={"name": "greet"}),
+                    ActionExecuted(ACTION_UNLIKELY_INTENT_NAME),
+                ],
+                [
+                    ActionExecuted(ACTION_LISTEN_NAME),
+                    UserUttered(text="hello", intent={"name": "greet"}),
+                ],
+            ),
+            (
+                [
+                    ActionExecuted(ACTION_LISTEN_NAME),
+                    UserUttered(text="hello", intent={"name": "greet"}),
+                    EntitiesAdded(entities=[{"entity": "name", "value": "Peter"}]),
+                    SlotSet("name", "Peter"),
+                    ActionExecuted(ACTION_UNLIKELY_INTENT_NAME),
+                ],
+                [
+                    ActionExecuted(ACTION_LISTEN_NAME),
+                    UserUttered(text="hello", intent={"name": "greet"}),
+                    SlotSet("name", "Peter"),
+                    EntitiesAdded(entities=[{"entity": "name", "value": "Peter"}]),
+                ],
+            ),
+        ],
+    )
+    def test_ignore_action_unlikely_intent(
+        self,
+        trained_policy: MemoizationPolicy,
+        default_domain: Domain,
+        tracker_events_with_action: List[Event],
+        tracker_events_without_action: List[Event],
+    ):
+        interpreter = RegexInterpreter()
+        tracker_with_action = DialogueStateTracker.from_events(
+            "test 1", evts=tracker_events_with_action, slots=default_domain.slots
+        )
+        tracker_without_action = DialogueStateTracker.from_events(
+            "test 2", evts=tracker_events_without_action, slots=default_domain.slots
+        )
+        prediction_with_action = trained_policy.predict_action_probabilities(
+            tracker_with_action, default_domain, interpreter
+        )
+        prediction_without_action = trained_policy.predict_action_probabilities(
+            tracker_without_action, default_domain, interpreter
+        )
+
+        # Memoization shouldn't be affected with the
+        # presence of action_unlikely_intent.
+        assert (
+            prediction_with_action.probabilities
+            == prediction_without_action.probabilities
+        )
 
 
 class TestAugmentedMemoizationPolicy(TestMemoizationPolicy):
@@ -506,7 +582,7 @@ class TestFormPolicy(TestMemoizationPolicy):
         (
             all_states,
             all_actions,
-        ) = trained_policy.featurizer.training_states_and_actions(trackers, domain)
+        ) = trained_policy.featurizer.training_states_and_labels(trackers, domain)
 
         for tracker, states, actions in zip(trackers, all_states, all_actions):
             for state in states:
@@ -573,8 +649,8 @@ class TestMappingPolicy(PolicyTestCollection):
         assert loaded.featurizer is None
 
     @pytest.fixture(scope="class")
-    def domain_with_mapping(self) -> Domain:
-        return Domain.load(DEFAULT_DOMAIN_PATH_WITH_MAPPING)
+    def domain_with_mapping(self, domain_with_mapping_path: Text) -> Domain:
+        return Domain.load(domain_with_mapping_path)
 
     @pytest.fixture
     def tracker(self, domain_with_mapping: Domain) -> DialogueStateTracker:

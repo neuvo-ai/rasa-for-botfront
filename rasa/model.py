@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 # Type alias for the fingerprint
-Fingerprint = Dict[Text, Union[Text, List[Text], int, float]]
+Fingerprint = Dict[Text, Union[Optional[Text], List[Text], int, float]]
 
 FINGERPRINT_FILE_PATH = "fingerprint.json"
 
@@ -233,7 +233,7 @@ def unpack_model(
         with tarfile.open(model_file, mode="r:gz") as tar:
             tar.extractall(working_directory)
             logger.debug(f"Extracted model to '{working_directory}'.")
-    except Exception as e:
+    except (tarfile.TarError, ValueError) as e:
         logger.error(f"Failed to extract model at {model_file}. Error: {e}")
         raise
 
@@ -448,7 +448,7 @@ def fingerprint_from_path(model_path: Text) -> Fingerprint:
         return {}
 
 
-def persist_fingerprint(output_path: Text, fingerprint: Fingerprint):
+def persist_fingerprint(output_path: Text, fingerprint: Fingerprint) -> None:
     """Persist a model fingerprint.
 
     Args:
@@ -531,7 +531,7 @@ def move_model(source: Text, target: Text) -> bool:
 
 def should_retrain(
     new_fingerprint: Fingerprint,
-    old_model: Text,
+    old_model: Optional[Text],
     train_path: Text,
     has_e2e_examples: bool = False,
     force_training: bool = False,
@@ -582,19 +582,19 @@ def should_retrain(
             force_training=force_training or model_outdated,
         )
 
-        # We should retrain core if nlu data changes and there are e2e stories.
-        if has_e2e_examples and fingerprint_comparison.should_retrain_nlu():
-            fingerprint_comparison.core = True
+            # We should retrain core if nlu data changes and there are e2e stories.
+            if has_e2e_examples and fingerprint_comparison.should_retrain_nlu():
+                fingerprint_comparison.core = True
 
-        core_merge_failed = False
-        if not fingerprint_comparison.should_retrain_core():
-            target_path = os.path.join(train_path, DEFAULT_CORE_SUBDIRECTORY_NAME)
-            core_merge_failed = not move_model(old_core, target_path)
-            fingerprint_comparison.core = core_merge_failed
+            core_merge_failed = False
+            if not fingerprint_comparison.should_retrain_core():
+                target_path = os.path.join(train_path, DEFAULT_CORE_SUBDIRECTORY_NAME)
+                core_merge_failed = not move_model(old_core, target_path)
+                fingerprint_comparison.core = core_merge_failed
 
-        if not fingerprint_comparison.should_retrain_nlg() and core_merge_failed:
-            # If moving the Core model failed, we should also retrain NLG
-            fingerprint_comparison.nlg = True
+            if not fingerprint_comparison.should_retrain_nlg() and core_merge_failed:
+                # If moving the Core model failed, we should also retrain NLG
+                fingerprint_comparison.nlg = True
 
         # bf mod >
         # if not fingerprint_comparison.should_retrain_nlu():
@@ -624,6 +624,12 @@ def should_retrain(
         fingerprint_comparison.nlu = languages_to_train
         # </ bf mod
 
+            return fingerprint_comparison
+    except Exception as e:
+        logger.error(
+            f"Failed to get the fingerprint. Error: {e}.\n"
+            f"Proceeding with running default retrain..."
+        )
         return fingerprint_comparison
 
 

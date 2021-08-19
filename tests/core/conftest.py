@@ -1,12 +1,13 @@
 import asyncio
-import os
 
 from rasa.utils.endpoints import EndpointConfig
 from sanic.request import Request
 import uuid
 from datetime import datetime
 
-from typing import Text, Generator, Callable
+from typing import Generator, Callable, Dict, Text
+
+from scipy import sparse
 
 import pytest
 
@@ -16,58 +17,15 @@ from rasa.core.channels.channel import CollectingOutputChannel, OutputChannel
 from rasa.shared.core.domain import Domain
 from rasa.shared.core.events import ReminderScheduled, UserUttered, ActionExecuted
 from rasa.core.nlg import TemplatedNaturalLanguageGenerator, NaturalLanguageGenerator
-from rasa.core.policies.ensemble import PolicyEnsemble
 from rasa.core.policies.memoization import Policy
 from rasa.core.processor import MessageProcessor
 from rasa.shared.core.slots import Slot
 from rasa.core.tracker_store import InMemoryTrackerStore, MongoTrackerStore
-from rasa.core.lock_store import LockStore, InMemoryLockStore
+from rasa.core.lock_store import InMemoryLockStore
 from rasa.shared.core.trackers import DialogueStateTracker
-
-DEFAULT_DOMAIN_PATH_WITH_SLOTS = "data/test_domains/default_with_slots.yml"
-
-DOMAIN_WITH_CATEGORICAL_SLOT = "data/test_domains/domain_with_categorical_slot.yml"
-
-DEFAULT_DOMAIN_PATH_WITH_MAPPING = "data/test_domains/default_with_mapping.yml"
-
-DEFAULT_STORIES_FILE = "data/test_yaml_stories/stories_defaultdomain.yml"
-
-DEFAULT_E2E_STORIES_FILE = "data/test_yaml_stories/stories_e2e.yml"
-
-SIMPLE_STORIES_FILE = "data/test_yaml_stories/stories_simple.yml"
-
-DEFAULT_STACK_CONFIG = "data/test_config/stack_config.yml"
-
-INCORRECT_NLU_DATA = "data/test/incorrect_nlu_format.yml"
-
-END_TO_END_STORY_FILE = "data/test_evaluations/end_to_end_story.yml"
-
-END_TO_END_STORY_MD_FILE = "data/test_md/end_to_end_story.md"
-
-E2E_STORY_FILE_UNKNOWN_ENTITY = "data/test_evaluations/story_unknown_entity.yml"
-
-STORY_FILE_TRIPS_CIRCUIT_BREAKER = (
-    "data/test_evaluations/stories_trip_circuit_breaker.yml"
-)
-
-E2E_STORY_FILE_TRIPS_CIRCUIT_BREAKER = (
-    "data/test_evaluations/end_to_end_trips_circuit_breaker.yml"
-)
-
-DEFAULT_ENDPOINTS_FILE = "data/test_endpoints/example_endpoints.yml"
-
-TEST_DIALOGUES = [
-    "data/test_dialogues/default.json",
-    "data/test_dialogues/formbot.json",
-    "data/test_dialogues/moodbot.json",
-]
-
-EXAMPLE_DOMAINS = [
-    DEFAULT_DOMAIN_PATH_WITH_SLOTS,
-    DEFAULT_DOMAIN_PATH_WITH_MAPPING,
-    "examples/formbot/domain.yml",
-    "examples/moodbot/domain.yml",
-]
+from rasa.shared.nlu.training_data.features import Features
+from rasa.shared.nlu.constants import INTENT, ACTION_NAME, FEATURE_TYPE_SENTENCE
+from tests.core.utilities import tracker_from_dialogue_file
 
 
 class CustomSlot(Slot):
@@ -120,28 +78,6 @@ def loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     loop = rasa.utils.io.enable_async_loop_debugging(loop)
     yield loop
     loop.close()
-
-
-@pytest.fixture(scope="session")
-def default_domain_path() -> Text:
-    return DEFAULT_DOMAIN_PATH_WITH_SLOTS
-
-
-@pytest.fixture(scope="session")
-def default_stories_file() -> Text:
-    return DEFAULT_STORIES_FILE
-
-
-@pytest.fixture(scope="session")
-def default_stack_config() -> Text:
-    return DEFAULT_STACK_CONFIG
-
-
-@pytest.fixture(scope="session")
-def default_nlu_data():
-    from tests.conftest import DEFAULT_NLU_DATA
-
-    return DEFAULT_NLU_DATA
 
 
 @pytest.fixture
@@ -205,13 +141,13 @@ def tracker_with_six_scheduled_reminders(
 
 
 @pytest.fixture
-def default_nlg(default_domain: Domain) -> NaturalLanguageGenerator:
-    return TemplatedNaturalLanguageGenerator(default_domain.responses)
+def default_nlg(domain: Domain) -> NaturalLanguageGenerator:
+    return TemplatedNaturalLanguageGenerator(domain.responses)
 
 
 @pytest.fixture
-def default_tracker(default_domain: Domain) -> DialogueStateTracker:
-    return DialogueStateTracker("my-sender", default_domain.slots)
+def default_tracker(domain: Domain) -> DialogueStateTracker:
+    return DialogueStateTracker("my-sender", domain.slots)
 
 
 @pytest.fixture(scope="session")
@@ -228,3 +164,42 @@ async def form_bot_agent(trained_async: Callable) -> Agent:
     )
 
     return Agent.load_local_model(zipped_model, action_endpoint=endpoint)
+
+
+@pytest.fixture
+def moodbot_features(
+    request: Request, moodbot_domain: Domain
+) -> Dict[Text, Dict[Text, Features]]:
+    """Makes intent and action features for the moodbot domain to faciliate
+    making expected state features.
+
+    Returns:
+      A dict containing dicts for mapping action and intent names to features.
+    """
+    origin = getattr(request, "param", "SingleStateFeaturizer")
+    action_shape = (1, len(moodbot_domain.action_names_or_texts))
+    actions = {}
+    for index, action in enumerate(moodbot_domain.action_names_or_texts):
+        actions[action] = Features(
+            sparse.coo_matrix(([1.0], [[0], [index]]), shape=action_shape),
+            FEATURE_TYPE_SENTENCE,
+            ACTION_NAME,
+            origin,
+        )
+    intent_shape = (1, len(moodbot_domain.intents))
+    intents = {}
+    for index, intent in enumerate(moodbot_domain.intents):
+        intents[intent] = Features(
+            sparse.coo_matrix(([1.0], [[0], [index]]), shape=intent_shape),
+            FEATURE_TYPE_SENTENCE,
+            INTENT,
+            origin,
+        )
+    return {"intents": intents, "actions": actions}
+
+
+@pytest.fixture
+def moodbot_tracker(moodbot_domain: Domain) -> DialogueStateTracker:
+    return tracker_from_dialogue_file(
+        "data/test_dialogues/moodbot.json", moodbot_domain
+    )

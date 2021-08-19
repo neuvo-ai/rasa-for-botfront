@@ -4,10 +4,26 @@ from collections import deque, defaultdict
 
 import uuid
 import typing
-from typing import List, Text, Dict, Optional, Tuple, Any, Set, ValuesView, Union
+from typing import (
+    List,
+    Text,
+    Dict,
+    Optional,
+    Tuple,
+    Any,
+    Set,
+    ValuesView,
+    Union,
+    Sequence,
+    cast,
+)
 
 import rasa.shared.utils.io
-from rasa.shared.core.constants import ACTION_LISTEN_NAME, ACTION_SESSION_START_NAME
+from rasa.shared.core.constants import (
+    ACTION_LISTEN_NAME,
+    ACTION_SESSION_START_NAME,
+    ACTION_UNLIKELY_INTENT_NAME,
+)
 from rasa.shared.core.conversation import Dialogue
 from rasa.shared.core.domain import Domain
 from rasa.shared.core.events import (
@@ -51,10 +67,22 @@ class EventTypeError(RasaCoreException, ValueError):
 
 
 class Checkpoint:
-    def __init__(
-        self, name: Optional[Text], conditions: Optional[Dict[Text, Any]] = None
-    ) -> None:
+    """Represents places where trackers split.
 
+    This currently happens if
+    - users place manual checkpoints in their stories
+    - have `or` statements for intents in their stories.
+    """
+
+    def __init__(
+        self, name: Text, conditions: Optional[Dict[Text, Any]] = None
+    ) -> None:
+        """Creates `Checkpoint`.
+
+        Args:
+            name: Name of the checkpoint.
+            conditions: Slot conditions for this checkpoint.
+        """
         self.name = name
         self.conditions = conditions if conditions else {}
 
@@ -141,12 +169,15 @@ class StoryStep:
         return f"    - {story_step_element.as_story_string()}\n"
 
     @staticmethod
-    def _or_string(story_step_element: List[Event], e2e: bool) -> Text:
+    def _or_string(story_step_element: Sequence[Event], e2e: bool) -> Text:
         for event in story_step_element:
             if not isinstance(event, UserUttered):
                 raise EventTypeError(
                     "OR statement events must be of type `UserUttered`."
                 )
+
+        # FIXME: https://github.com/python/mypy/issues/7853
+        story_step_element = cast(Sequence[UserUttered], story_step_element)
 
         result = " OR ".join(
             [element.as_story_string(e2e) for element in story_step_element]
@@ -160,35 +191,36 @@ class StoryStep:
             result = ""
         else:
             result = f"\n## {self.block_name}\n"
-            for s in self.start_checkpoints:
-                if s.name != STORY_START:
-                    result += self._checkpoint_string(s)
+            for checkpoint in self.start_checkpoints:
+                if checkpoint.name != STORY_START:
+                    result += self._checkpoint_string(checkpoint)
 
-        for s in self.events:
+        for event in self.events:
             if (
-                self.is_action_listen(s)
-                or self.is_action_session_start(s)
-                or isinstance(s, SessionStarted)
+                self.is_action_listen(event)
+                or self.is_action_session_start(event)
+                or self.is_action_unlikely_intent(event)
+                or isinstance(event, SessionStarted)
             ):
                 continue
 
-            if isinstance(s, UserUttered):
-                result += self._user_string(s, e2e)
-            elif isinstance(s, Event):
-                converted = s.as_story_string()
+            if isinstance(event, UserUttered):
+                result += self._user_string(event, e2e)
+            elif isinstance(event, Event):
+                converted = event.as_story_string()
                 if converted:
-                    result += self._bot_string(s)
-            elif isinstance(s, list):
+                    result += self._bot_string(event)
+            elif isinstance(event, list):
                 # The story reader classes support reading stories in
                 # conversion mode.  When this mode is enabled, OR statements
                 # are represented as lists of events.
-                result += self._or_string(s, e2e)
+                result += self._or_string(event, e2e)
             else:
-                raise Exception(f"Unexpected element in story step: {s}")
+                raise Exception(f"Unexpected element in story step: {event}")
 
         if not flat:
-            for s in self.end_checkpoints:
-                result += self._checkpoint_string(s)
+            for checkpoint in self.end_checkpoints:
+                result += self._checkpoint_string(checkpoint)
         return result
 
     @staticmethod
@@ -198,7 +230,16 @@ class StoryStep:
         return type(event) == ActionExecuted and event.action_name == ACTION_LISTEN_NAME
 
     @staticmethod
+    def is_action_unlikely_intent(event: Event) -> bool:
+        """Checks if the executed action is a `action_unlikely_intent`."""
+        return (
+            type(event) == ActionExecuted
+            and event.action_name == ACTION_UNLIKELY_INTENT_NAME
+        )
+
+    @staticmethod
     def is_action_session_start(event: Event) -> bool:
+        """Checks if the executed action is a `action_session_start`."""
         # this is not an `isinstance` because
         # we don't want to allow subclasses here
         return (
@@ -365,14 +406,6 @@ class Story:
             return f"## {name}\n{story_content}"
         else:
             return story_content
-
-    def dump_to_file(
-        self, filename: Text, flat: bool = False, e2e: bool = False
-    ) -> None:
-
-        rasa.shared.utils.io.write_text_file(
-            self.as_story_string(flat, e2e), filename, append=True
-        )
 
 
 class StoryGraph:
@@ -691,7 +724,7 @@ class StoryGraph:
 
         removed_edges = set()
 
-        def dfs(node):
+        def dfs(node: Text) -> None:
             visited_nodes[node] = GRAY
             for k in sorted(graph.get(node, set())):
                 sk = visited_nodes.get(k, None)

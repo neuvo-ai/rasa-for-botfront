@@ -1,12 +1,12 @@
 import argparse
 import logging
 import os
-from typing import List, Text
+from typing import List, Text, NoReturn
 
 from rasa.cli import SubParsersAction
 from rasa.cli.arguments import run as arguments
 import rasa.cli.utils
-import rasa.shared.utils.cli
+import rasa.shared.utils.cli  # noqa: F401
 from rasa.shared.constants import (
     DOCS_BASE_URL,
     DEFAULT_ENDPOINTS_PATH,
@@ -51,7 +51,7 @@ def add_subparser(
     arguments.set_run_action_arguments(sdk_subparser)
 
 
-def run_actions(args: argparse.Namespace):
+def run_actions(args: argparse.Namespace) -> None:
     import rasa_sdk.__main__ as sdk
 
     args.actions = args.actions or DEFAULT_ACTIONS_PATH
@@ -59,7 +59,7 @@ def run_actions(args: argparse.Namespace):
     sdk.main_from_args(args)
 
 
-def _validate_model_path(model_path: Text, parameter: Text, default: Text):
+def _validate_model_path(model_path: Text, parameter: Text, default: Text) -> Text:
 
     if model_path is not None and not os.path.exists(model_path):
         reason_str = f"'{model_path}' not found."
@@ -74,7 +74,7 @@ def _validate_model_path(model_path: Text, parameter: Text, default: Text):
     return model_path
 
 
-def run(args: argparse.Namespace):
+def run(args: argparse.Namespace) -> NoReturn:
     import rasa.run
     # botfront:start
     from rasa.utils.botfront import set_endpoints_credentials_args_from_remote
